@@ -4,6 +4,8 @@ import io
 import csv
 import pandas as pd
 from datetime import datetime, timedelta
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # Lista de meses
 meses = [
@@ -27,17 +29,16 @@ ano = hoje.year
 
 print(f"Rodando para a data: {dia}/{mes}/{ano}")
 
-n_edicao = 27
+n_edicao = 32
 barrinha = "|"
 
 # Lógica para definir o nome da pasta do mês
-
 mes_pasta = meses[mes - 1]
 
-
 lista_editais = []
+edicao_encontrada = False  # Flag para parar após encontrar um edital
 
-while True:
+while not edicao_encontrada:
     print(f"Buscando edição {n_edicao}")
 
     # Formatar o número da edição com 3 dígitos (ex: 027)
@@ -74,12 +75,13 @@ while True:
                 }
 
                 lista_editais.append(edital)
+                edicao_encontrada = True  # Para o loop assim que encontrar um edital
+                break  # Sai do loop de páginas
 
     except Exception as e:
-        print(f"Erro ao acessar a edição {n_edicao}. Pode ser que ela não exista. Parando...\n")
-        break  
+        print(f"Erro ao acessar a edição {n_edicao}. Tentando próxima...\n")
 
-    n_edicao += 1  # Próxima edição
+    n_edicao += 1  # Incrementa a edição para a próxima tentativa
 
 # Salvando os dados em CSV
 csv_filename = f'editais_{mes_pasta}.csv'
@@ -94,3 +96,24 @@ with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
 # Lendo o CSV com Pandas
 editais = pd.read_csv(csv_filename)
 print(editais)
+
+# Define o escopo de permissões
+scope = ["https://spreadsheets.google.com/feeds",
+         "https://www.googleapis.com/auth/spreadsheets",
+         "https://www.googleapis.com/auth/drive.file",
+         "https://www.googleapis.com/auth/drive"]
+
+# Carrega as credenciais do arquivo JSON
+creds = ServiceAccountCredentials.from_json_keyfile_name('C:\\Users\\Hugo\\Documents\\Dados\\projetodedados.json', scope)
+
+# Autoriza e abre a planilha
+client = gspread.authorize(creds)
+
+# Abre a planilha pelo nome ou pelo URL
+spreadsheet = client.open("editais_chamamento_dodf_code").sheet1
+
+# Exemplo de dados a serem inseridos
+data = ["data", "edicao", "pagina", "texto"]
+
+# Adiciona os dados à primeira linha vazia da planilha
+spreadsheet.append_row(data)
