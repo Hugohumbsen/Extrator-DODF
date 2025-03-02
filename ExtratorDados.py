@@ -93,6 +93,27 @@ with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
     for edital in lista_editais:
         writer.writerow(edital)
 
+
+# Função para salvar no Google Sheets
+def salvar_no_google_sheets(sheet, edital):
+    """
+    Salva os dados do edital no Google Sheets.
+    
+    :param sheet: Objeto da planilha do Google.
+    :param edital: Dicionário contendo 'data', 'edicao', 'pagina' e 'texto'.
+    """
+    # Divide o texto do edital em linhas menores
+    linhas_texto = edital["texto"].split("\n")
+
+    # Adiciona os dados principais na primeira linha de forma explícita
+    sheet.append_row(["Data", "Edição", "Página", "Texto"])  # Coloca os cabeçalhos primeiro
+    sheet.append_row([edital["data"], edital["edicao"], edital["pagina"], linhas_texto[0]])
+
+    # Insere o restante do texto abaixo da linha principal, com as 3 primeiras colunas vazias
+    for linha in linhas_texto[1:]:
+        sheet.append_row(["", "", "", linha])  # Deixa as 3 primeiras colunas vazias para alinhar o texto
+
+
 # Lendo o CSV com Pandas
 editais = pd.read_csv(csv_filename)
 print(editais)
@@ -104,7 +125,7 @@ scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
 # Carrega as credenciais do arquivo JSON
-creds = ServiceAccountCredentials.from_json_keyfile_name('C:\\Users\\Hugo\\Documents\\Dados\\projetodedados.json', scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name('C:/Users/Hugo/Documents/DadoJson/projetodedados.json', scope)
 
 # Autoriza e abre a planilha
 client = gspread.authorize(creds)
@@ -112,8 +133,6 @@ client = gspread.authorize(creds)
 # Abre a planilha pelo nome ou pelo URL
 spreadsheet = client.open("editais_chamamento_dodf_code").sheet1
 
-# Exemplo de dados a serem inseridos
-data = ["data", "edicao", "pagina", "texto"]
-
-# Adiciona os dados à primeira linha vazia da planilha
-spreadsheet.append_row(data)
+# Adiciona os dados ao Google Sheets
+for edital in lista_editais:
+    salvar_no_google_sheets(spreadsheet, edital)
