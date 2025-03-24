@@ -1,0 +1,28 @@
+name: Extrair DODF Diariamente
+on:
+  schedule:
+    - cron: '0 12 * * *'  # 9h BRT (12:00 UTC)
+  workflow_dispatch:       # Permite rodar manualmente
+
+jobs:
+  run-extractor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          
+      - name: Instalar dependências
+        run: pip install -r app/requirements.txt
+        
+      - name: Criar arquivo de credenciais
+        env:
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
+        run: |
+          echo "$GOOGLE_CREDS_JSON" > app/projectodedados.json
+          
+      - name: Executar extrator
+        run: cd app && python ExtratorDados.py
