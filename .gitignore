@@ -1,0 +1,27 @@
+# Arquivos de configuração sensíveis
+app/projectodedados.json
+projetodedados.json
+creds_base64.txt
+
+# Arquivos do Docker/Make
+Dockerfile
+.dockerignore
+Makefile
+
+# Pasta de ambiente virtual Python
+venv/
+.env/
+
+# Arquivos temporários/IDE
+*.tmp
+*.swp
+.idea/
+.vscode/
+
+# Logs e outputs
+*.log
+output/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
