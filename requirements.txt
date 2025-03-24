@@ -1,0 +1,6 @@
+PyPDF2
+pandas
+gspread
+google-auth
+google-auth-oauthlib
+
