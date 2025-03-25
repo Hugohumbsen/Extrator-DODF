@@ -73,7 +73,7 @@ def diario_oficial_df(request, context):
              "https://www.googleapis.com/auth/drive"]
 
     # Carrega as credenciais do arquivo JSON
-    creds = Credentials.from_service_account_file('C:/Users/Hugo/Documents/Extrator-DODF/projetodedados.json', scopes=scope)
+    creds = Credentials.from_service_account_file('app/projectodedados.json', scopes=scope)
 
     # Autoriza e abre a planilha
     client = gspread.authorize(creds)
