@@ -1,4 +1,5 @@
 name: Extrair DODF Diariamente
+
 on:
   schedule:
     - cron: '0 15 * * *'  # 9h BRT (12:00 UTC)
@@ -7,6 +8,7 @@ on:
 jobs:
   run-extractor:
     runs-on: ubuntu-latest
+    
     steps:
       - uses: actions/checkout@v4
       
@@ -16,13 +18,12 @@ jobs:
           python-version: "3.10"
           
       - name: Instalar dependências
-        run: pip install -r requirements.txt  # ✅ Correção aqui
-        
-      - name: Criar arquivo de credenciais
-        env:
-          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
         run: |
-          echo "$GOOGLE_CREDS_JSON" > app/projectodedados.json
+          python -m pip install --upgrade pip
+          pip install PyPDF2 gspread google-auth urllib3
           
       - name: Executar extrator
-        run: cd app && python ExtratorDados.py
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDS_JSON }}  # Corrigido para match com o código
+        run: |
+          cd app && python ExtratorDados.py
