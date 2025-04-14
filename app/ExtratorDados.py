@@ -7,203 +7,209 @@ from google.oauth2.service_account import Credentials
 from urllib.parse import quote
 import json
 import os
+import logging
 
-# Função para carregar a última edição buscada do Google Sheets
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('extrator.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
 def carregar_ultima_edicao(sheet):
+    """Carrega o número da última edição buscada da célula H1"""
     try:
-        # Lê o valor da célula H1
         valor = sheet.acell('H1').value
-        if valor and valor.isdigit():  # Verifica se o valor é um número válido
+        if valor and valor.isdigit():
+            logger.info(f"Última edição carregada: {valor}")
             return int(valor)
         else:
-            print(f"Valor inválido na célula H1: '{valor}'. Usando valor padrão 53.")
-            return 53  # Valor padrão se a célula estiver vazia ou contiver um valor inválido
+            logger.warning(f"Valor inválido na H1: '{valor}'. Usando padrão 53.")
+            return 53
     except Exception as e:
-        print(f"Erro ao carregar a última edição: {e}")
-        return 53  # Valor padrão em caso de erro
+        logger.error(f"Erro ao carregar última edição: {e}")
+        return 53
 
-# Função para salvar a última edição buscada no Google Sheets
 def salvar_ultima_edicao(sheet, n_edicao):
+    """Salva o número da última edição na célula H1"""
     try:
-        # Salva o valor na célula H1 usando argumentos nomeados
         sheet.update(range_name='H1', values=[[str(n_edicao)]])
+        logger.info(f"Salva última edição {n_edicao} na H1")
     except Exception as e:
-        print(f"Erro ao salvar a última edição: {e}")
+        logger.error(f"Erro ao salvar última edição: {e}")
 
-# Função para salvar os dados do edital no Google Sheets
 def salvar_no_google_sheets(sheet, edital):
     """
-    Salva os dados do edital no Google Sheets.
-    - Adiciona uma linha de cabeçalho antes dos dados de cada edital.
-    - Quebra o texto em várias células, com cada linha do texto em uma célula diferente.
-
-    :param sheet: Objeto da planilha do Google.
-    :param edital: Dicionário contendo 'data', 'edicao', 'pagina' e 'texto'.
+    Salva os dados do edital no Google Sheets no formato especificado:
+    - Uma linha de cabeçalho
+    - Cada linha do texto em uma linha separada na coluna D
+    - Mantém data, edição e página apenas na primeira linha
     """
     try:
         # Encontra a próxima linha vazia
-        proxima_linha = len(sheet.get_all_values()) + 1
-
-        # Adiciona a linha de cabeçalho
+        todos_valores = sheet.get_all_values()
+        proxima_linha = len(todos_valores) + 1
+        
+        # Adiciona cabeçalho
         cabecalhos = ["Data", "Edição", "Página", "Texto"]
         sheet.update(range_name=f'A{proxima_linha}:D{proxima_linha}', values=[cabecalhos])
+        logger.info(f"Cabeçalho adicionado na linha {proxima_linha}")
 
         # Divide o texto em linhas
-        linhas_texto = edital["texto"].split("\n")
+        linhas_texto = edital["texto"].split('\n')
+        logger.info(f"Encontradas {len(linhas_texto)} linhas de texto")
 
-        # Salva cada linha do texto em uma célula separada na coluna D
+        # Salva cada linha do texto
         for i, linha in enumerate(linhas_texto):
-            # Define os valores a serem salvos
+            if not linha.strip():  # Ignora linhas vazias
+                continue
+                
             valores = [
-                edital["data"] if i == 0 else "",  # Coluna A (só na primeira linha)
-                edital["edicao"] if i == 0 else "",  # Coluna B (só na primeira linha)
-                edital["pagina"] if i == 0 else "",  # Coluna C (só na primeira linha)
-                linha  # Coluna D (cada linha do texto)
+                edital["data"] if i == 0 else "",
+                edital["edicao"] if i == 0 else "",
+                edital["pagina"] if i == 0 else "",
+                linha.strip()
             ]
+            
+            range_to_update = f'A{proxima_linha + 1 + i}:D{proxima_linha + 1 + i}'
+            sheet.update(range_name=range_to_update, values=[valores])
+            logger.debug(f"Linha {proxima_linha + 1 + i} atualizada")
 
-            # Atualiza a linha correspondente
-            sheet.update(range_name=f'A{proxima_linha + 1 + i}:D{proxima_linha + 1 + i}', values=[valores])
+        logger.info(f"Dados do edital {edital['edicao']} salvos com sucesso")
     except Exception as e:
-        print(f"Erro ao salvar no Google Sheets: {e}")
+        logger.error(f"Erro ao salvar edital: {e}")
+        raise
 
 def get_google_credentials():
-    """Obtém as credenciais do Google a partir das variáveis de ambiente"""
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive.file",
-             "https://www.googleapis.com/auth/drive"]
+    """Obtém credenciais do Google a partir de variáveis de ambiente ou arquivo"""
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     
-    # Verifica se está rodando no GitHub Actions (com segredo)
-    if 'GOOGLE_CREDENTIALS' in os.environ:
-        credentials_json = os.environ['GOOGLE_CREDENTIALS']
-        return Credentials.from_service_account_info(json.loads(credentials_json), scopes=scope)
-    # Se estiver rodando localmente com arquivo JSON
-    elif os.path.exists('projectodedados.json'):
-        return Credentials.from_service_account_file('projectodedados.json', scopes=scope)
-    else:
-        raise Exception("Nenhuma credencial do Google encontrada. Verifique as configurações.")
-
-# Função principal que será chamada pelo Cloud Functions
-def diario_oficial_df(request, context):
     try:
-        # Obtém as credenciais
-        creds = get_google_credentials()
+        if 'GOOGLE_CREDENTIALS' in os.environ:
+            logger.info("Usando credenciais de variáveis de ambiente")
+            return Credentials.from_service_account_info(
+                json.loads(os.environ['GOOGLE_CREDENTIALS']),
+                scopes=scope
+            )
+        elif os.path.exists('projectodedados.json'):
+            logger.info("Usando credenciais de arquivo local")
+            return Credentials.from_service_account_file(
+                'projectodedados.json',
+                scopes=scope
+            )
+        else:
+            raise Exception("Nenhuma credencial encontrada")
+    except Exception as e:
+        logger.error(f"Erro nas credenciais: {e}")
+        raise
+
+def processar_pdf(pdf_content, n_edicao, data_edicao):
+    """Processa o conteúdo do PDF em busca de editais"""
+    lista_editais = []
+    leitor_pdf = PyPDF2.PdfReader(pdf_content)
+    
+    for numero_pagina, pagina in enumerate(leitor_pdf.pages, start=1):
+        try:
+            texto_pagina = pagina.extract_text()
+            if not texto_pagina:
+                continue
+                
+            # Normaliza o texto para busca
+            texto_normalizado = texto_pagina.lower().replace('\n', ' ')
+            
+            if "edital de chamamento" in texto_normalizado:
+                posicao = texto_normalizado.find("edital de chamamento")
+                trecho_texto = texto_pagina[max(0, posicao-50):posicao+500]
+                
+                logger.info(f"Edital encontrado na página {numero_pagina}")
+                logger.debug(f"Trecho:\n{trecho_texto[:200]}...")
+
+                edital = {
+                    'data': data_edicao,
+                    'edicao': n_edicao,
+                    'pagina': numero_pagina,
+                    'texto': trecho_texto.strip()
+                }
+                lista_editais.append(edital)
+        except Exception as e:
+            logger.error(f"Erro ao processar página {numero_pagina}: {e}")
+    
+    return lista_editais
+
+def diario_oficial_df(request, context):
+    """Função principal para extração de dados"""
+    try:
+        logger.info("Iniciando extração de dados")
         
-        # Autoriza e abre a planilha
+        # Configuração inicial
+        creds = get_google_credentials()
         client = gspread.authorize(creds)
-
-        # Abre a planilha pelo nome ou pelo URL
-        spreadsheet = client.open("editais_chamamento_dodf_code").sheet1
-
-        # Carrega a última edição buscada
-        n_edicao = carregar_ultima_edicao(spreadsheet)
-
-        # Lista de meses
-        meses = [
-            "01_Janeiro", "02_Fevereiro", "03_Março", "04_Abril",
-            "05_Maio", "06_Junho", "07_Julho", "08_Agosto",
-            "09_Setembro", "10_Outubro", "11_Novembro", "12_Dezembro"
-        ]
-
-        # Pegando a data atual separada
+        spreadsheet = client.open("editais_chamamento_dodf_code")
+        sheet = spreadsheet.sheet1
+        
+        # Data e edição
         hoje = datetime.today()
-
-        # Se for sábado (5), retrocede 1 dia. Se for domingo (6), retrocede 2 dias.
         if hoje.weekday() == 5:  # Sábado
             hoje -= timedelta(days=1)
         elif hoje.weekday() == 6:  # Domingo
             hoje -= timedelta(days=2)
             
-        dia = hoje.day
-        mes = hoje.month
-        ano = hoje.year
+        n_edicao = carregar_ultima_edicao(sheet) + 1
+        data_edicao = f"{hoje.day:02d}-{hoje.month:02d}-{hoje.year}"
+        edicao_formatada = f"{n_edicao:03d}"
+        
+        logger.info(f"Processando edição {n_edicao} para {data_edicao}")
 
-        print(f"Rodando para a data: {dia}/{mes}/{ano}")
-
-        # Define a edição atual como a última edição buscada + 1
-        n_edicao += 1
-
-        # Lógica para definir o nome da pasta do mês
-        mes_pasta = meses[mes - 1]
-
-        lista_editais = []
-
-        print(f"Buscando edição {n_edicao}")
-
-        # Formatar o número da edição com 3 dígitos (ex: 027)
-        edicao_formatada = f"{n_edicao:03d}"    
-
-        # Formatar a data corretamente (ex: 07-02-2025)
-        data_edicao = f"{dia:02d}-{mes:02d}-{ano}"
-
-        # Codificar o URL corretamente para lidar com caracteres especiais
-        pasta_codificada = quote(f"{ano}|{mes_pasta}|DODF {edicao_formatada} {data_edicao}|")
+        # Construção da URL
+        meses = ["01_Janeiro", "02_Fevereiro", "03_Março", "04_Abril",
+                "05_Maio", "06_Junho", "07_Julho", "08_Agosto",
+                "09_Setembro", "10_Outubro", "11_Novembro", "12_Dezembro"]
+        mes_pasta = meses[hoje.month - 1]
+        
+        pasta_codificada = quote(f"{hoje.year}|{mes_pasta}|DODF {edicao_formatada} {data_edicao}|")
         arquivo_codificado = quote(f"DODF {edicao_formatada} {data_edicao} INTEGRA.pdf")
-        link = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={pasta_codificada}&arquivo={arquivo_codificado}"
+        url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={pasta_codificada}&arquivo={arquivo_codificada}"
+        
+        logger.info(f"URL gerada: {url}")
 
-        print(f"Acessando: {link}\n")
-
+        # Download e processamento do PDF
         try:
-            with urllib.request.urlopen(link) as response:
-                conteudo_pdf = response.read()
+            with urllib.request.urlopen(url) as response:
+                pdf_content = io.BytesIO(response.read())
             
-            pdf_content = io.BytesIO(conteudo_pdf)
-            leitor_pdf = PyPDF2.PdfReader(pdf_content)
-
-            # Variável para verificar se a frase foi encontrada
-            frase_encontrada = False
-
-            for numero_pagina, pagina in enumerate(leitor_pdf.pages, start=1):
-                texto_pagina = pagina.extract_text()
-                if texto_pagina and "edital de chamamento" in texto_pagina.lower():
-                    posicao_edital = texto_pagina.lower().find("edital")
-                    trecho_texto = texto_pagina[posicao_edital:posicao_edital + 1000]
-
-                    print(f"Trecho encontrado na página {numero_pagina}:\n{trecho_texto}\n")
-
-                    edital = {
-                        'data': data_edicao,
-                        'edicao': n_edicao,
-                        'pagina': numero_pagina,
-                        'texto': trecho_texto
-                    }
-
-                    lista_editais.append(edital)
-                    frase_encontrada = True
-                    break  # Sai do loop de páginas
-
-            if not frase_encontrada:
-                print(f"Nenhuma menção a 'edital de chamamento' encontrada na edição {n_edicao}.")
-
-        except urllib.error.HTTPError as e:
-            if e.code == 404:  # Se o link não existir (erro 404)
-                print(f"Edição {n_edicao} não encontrada.")
+            lista_editais = processar_pdf(pdf_content, n_edicao, data_edicao)
+            
+            if lista_editais:
+                logger.info(f"Encontrados {len(lista_editais)} editais")
+                for edital in lista_editais:
+                    salvar_no_google_sheets(sheet, edital)
             else:
-                print(f"Erro ao acessar a edição {n_edicao}: {e}.")
-        except Exception as e:
-            print(f"Erro ao acessar a edição {n_edicao}: {e}.")
-
-        # Salva a última edição buscada no Google Sheets
-        salvar_ultima_edicao(spreadsheet, n_edicao)
-
-        # Adiciona os dados ao Google Sheets
-        for edital in lista_editais:
-            salvar_no_google_sheets(spreadsheet, edital)
-
-        # Mostra a última edição encontrada
-        if lista_editais:
-            ultima_edicao = lista_editais[-1]['edicao']
-            print(f"A última edição encontrada foi: {ultima_edicao}")
-        else:
-            print("Nenhuma edição válida foi encontrada.")
-
-        return "Dados atualizados com sucesso!" if lista_editais else "Nenhuma edição encontrada."
-
+                logger.info("Nenhum edital encontrado neste PDF")
+                
+            # Atualiza última edição mesmo se não encontrar editais
+            salvar_ultima_edicao(sheet, n_edicao)
+            
+            return "Dados atualizados com sucesso!" if lista_editais else "Nenhum edital encontrado."
+                
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                logger.warning(f"Edição {n_edicao} não encontrada (404)")
+            else:
+                logger.error(f"Erro HTTP ao acessar edição {n_edicao}: {e}")
+            salvar_ultima_edicao(sheet, n_edicao)
+            return f"Erro ao acessar PDF: {e}"
+            
     except Exception as e:
-        print(f"Erro crítico na execução do script: {e}")
+        logger.error(f"Erro crítico: {e}", exc_info=True)
         return f"Erro na execução: {str(e)}"
 
-# Teste local
 if __name__ == "__main__":
-    print("Iniciando o script...")
+    print("Iniciando execução local...")
     diario_oficial_df(None, None)
