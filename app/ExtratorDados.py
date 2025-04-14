@@ -20,6 +20,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Lista de meses para construção da URL
+meses = [
+    "01_Janeiro", "02_Fevereiro", "03_Março", "04_Abril",
+    "05_Maio", "06_Junho", "07_Julho", "08_Agosto",
+    "09_Setembro", "10_Outubro", "11_Novembro", "12_Dezembro"
+]
+
 def carregar_ultima_edicao(sheet):
     """Carrega o número da última edição buscada da célula H1"""
     try:
@@ -82,24 +89,39 @@ def salvar_no_google_sheets(sheet, edital):
         return False
 
 def get_google_credentials():
-    """Obtém as credenciais do Google a partir das variáveis de ambiente"""
+    """Obtém as credenciais do Google com verificação rigorosa"""
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     
     try:
-        if 'GOOGLE_CREDENTIALS' in os.environ:
-            logger.info("Usando credenciais do GitHub Actions")
-            creds_info = json.loads(os.environ['GOOGLE_CREDENTIALS'])
-            return Credentials.from_service_account_info(creds_info, scopes=scope)
+        if 'GOOGLE_CREDS_JSON' in os.environ:
+            logger.info("Usando credenciais do GitHub Secrets")
+            creds_json = os.environ['GOOGLE_CREDS_JSON']
+            
+            # Verificação extra do JSON
+            try:
+                json.loads(creds_json)  # Testa se é JSON válido
+                return Credentials.from_service_account_info(
+                    json.loads(creds_json),
+                    scopes=scope
+                )
+            except json.JSONDecodeError as e:
+                logger.error("JSON de credenciais inválido!")
+                raise
+
         elif os.path.exists('projectodedados.json'):
-            logger.info("Usando credenciais locais do arquivo")
-            return Credentials.from_service_account_file('projectodedados.json', scopes=scope)
+            logger.info("Usando credenciais locais")
+            return Credentials.from_service_account_file(
+                'projectodedados.json',
+                scopes=scope
+            )
         else:
-            raise Exception("Nenhuma credencial do Google encontrada")
+            raise Exception("Nenhuma credencial encontrada")
+            
     except Exception as e:
-        logger.error(f"Erro nas credenciais: {str(e)}")
+        logger.error(f"Falha na autenticação: {str(e)}")
         raise
 
 def processar_pdf(pdf_content, n_edicao, data_edicao):
@@ -116,9 +138,12 @@ def processar_pdf(pdf_content, n_edicao, data_edicao):
                     continue
 
                 # Busca por variações da frase
-                texto_normalizado = texto.lower()
-                if "edital de chamamento" in texto_normalizado:
-                    pos = texto_normalizado.find("edital de chamamento")
+                texto_normalizado = texto.lower().replace('\n', ' ')
+                if ("edital de chamamento" in texto_normalizado or 
+                    "edital chamamento" in texto_normalizado or
+                    "edital n°" in texto_normalizado):
+                    
+                    pos = texto_normalizado.find("edital")
                     trecho = texto[max(0, pos-100):pos+500]  # Pega contexto
 
                     logger.info(f"Edital encontrado na página {pagina_num}")
@@ -141,78 +166,74 @@ def processar_pdf(pdf_content, n_edicao, data_edicao):
 def diario_oficial_df(request, context):
     """Função principal para extração de dados"""
     try:
-        logger.info("Iniciando extração do DODF")
+        logger.info("=== INÍCIO DA EXECUÇÃO ===")
 
-        # 1. Autenticação
+        # 1. Conexão com Google Sheets
         try:
             creds = get_google_credentials()
             client = gspread.authorize(creds)
             planilha = client.open("editais_chamamento_dodf_code")
             sheet = planilha.sheet1
-            logger.info("Conexão com Google Sheets estabelecida")
+            
+            # Teste de escrita imediato
+            sheet.update('J1', [["Teste de conexão em " + str(datetime.now())]])
+            logger.info("Teste de conexão bem-sucedido")
         except Exception as e:
-            logger.error(f"Falha na conexão com Google Sheets: {str(e)}")
-            return "Erro: Falha na conexão com a planilha"
+            logger.error(f"FALHA NA CONEXÃO: {str(e)}")
+            return "Erro: Falha na autenticação com Google Sheets"
 
-        # 2. Determinar edição atual
+        # 2. Controle de edições
         try:
             ultima_edicao = carregar_ultima_edicao(sheet)
             n_edicao = ultima_edicao + 1
-            logger.info(f"Última edição: {ultima_edicao}, Próxima: {n_edicao}")
+            logger.info(f"Edição atual: {ultima_edicao} | Próxima: {n_edicao}")
         except Exception as e:
-            logger.error(f"Erro ao carregar última edição: {str(e)}")
-            return "Erro: Não foi possível determinar a última edição"
+            logger.error(f"ERRO NO CONTADOR: {str(e)}")
+            return "Erro: Falha ao acessar contador H1"
 
-        # 3. Preparar data e URL
-        hoje = datetime.today()
-        if hoje.weekday() == 5: hoje -= timedelta(days=1)  # Sábado
-        elif hoje.weekday() == 6: hoje -= timedelta(days=2)  # Domingo
-
-        data_edicao = f"{hoje.day:02d}-{hoje.month:02d}-{hoje.year}"
-        edicao_formatada = f"{n_edicao:03d}"
-        
-        meses = ["01_Janeiro", "02_Fevereiro", "03_Março", "04_Abril",
-                "05_Maio", "06_Junho", "07_Julho", "08_Agosto",
-                "09_Setembro", "10_Outubro", "11_Novembro", "12_Dezembro"]
-        mes_pasta = meses[hoje.month - 1]
-
-        url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={quote(f'{hoje.year}|{mes_pasta}|DODF {edicao_formatada} {data_edicao}|')}&arquivo={quote(f'DODF {edicao_formatada} {data_edicao} INTEGRA.pdf')}"
-        logger.info(f"URL gerada: {url}")
-
-        # 4. Baixar e processar PDF
+        # 3. Download do PDF
         try:
+            hoje = datetime.today()
+            if hoje.weekday() == 5: hoje -= timedelta(days=1)  # Ajuste para sábado
+            elif hoje.weekday() == 6: hoje -= timedelta(days=2)  # Ajuste para domingo
+
+            data_edicao = f"{hoje.day:02d}-{hoje.month:02d}-{hoje.year}"
+            url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={quote(f'{hoje.year}|{meses[hoje.month-1]}|DODF {n_edicao:03d} {data_edicao}|')}&arquivo={quote(f'DODF {n_edicao:03d} {data_edicao} INTEGRA.pdf')}"
+            
+            logger.info(f"URL: {url}")
+            
             with urllib.request.urlopen(url) as response:
                 pdf_content = io.BytesIO(response.read())
-                logger.info(f"PDF baixado - {len(pdf_content.getvalue())} bytes")
+                if len(pdf_content.getvalue()) < 1024:
+                    raise Exception("PDF vazio ou inválido")
+        except urllib.error.HTTPError as e:
+            logger.error(f"PDF não encontrado (HTTP {e.code})")
+            salvar_ultima_edicao(sheet, n_edicao)  # Atualiza mesmo se falhar
+            return f"Erro: Edição {n_edicao} não encontrada"
+        except Exception as e:
+            logger.error(f"ERRO NO PDF: {str(e)}")
+            salvar_ultima_edicao(sheet, n_edicao)
+            return "Erro: Falha no download do PDF"
 
+        # 4. Processamento e salvamento
+        try:
             editais = processar_pdf(pdf_content, n_edicao, data_edicao)
-            logger.info(f"Encontrados {len(editais)} editais")
-
-            # 5. Salvar resultados
             if editais:
                 for edital in editais:
-                    if not salvar_no_google_sheets(sheet, edital):
-                        logger.error("Falha ao salvar edital")
+                    salvar_no_google_sheets(sheet, edital)
             
-            # 6. Atualizar contador (sempre, mesmo sem editais)
-            if not salvar_ultima_edicao(sheet, n_edicao):
-                logger.error("Falha ao atualizar contador")
-
-            return "Processamento concluído" + ("" if editais else " (nenhum edital encontrado)")
-
-        except urllib.error.HTTPError as e:
-            logger.error(f"Erro HTTP {e.code} ao acessar {url}")
-            # Atualiza contador mesmo se o PDF não existir
+            # Atualiza contador independentemente de encontrar editais
             salvar_ultima_edicao(sheet, n_edicao)
-            return f"Erro: Edição não encontrada (HTTP {e.code})"
+            
+            return "Sucesso" + (f" ({len(editais)} editais)" if editais else " (0 editais)")
             
         except Exception as e:
-            logger.error(f"Erro ao processar PDF: {str(e)}")
-            return "Erro: Falha no processamento do PDF"
+            logger.error(f"ERRO NO PROCESSAMENTO: {str(e)}")
+            return "Erro: Falha ao processar dados"
 
     except Exception as e:
-        logger.error(f"Erro crítico: {str(e)}")
-        return f"Erro: {str(e)}"
+        logger.error(f"ERRO GRAVE: {str(e)}", exc_info=True)
+        return "Erro crítico na execução"
 
 if __name__ == "__main__":
     print("Iniciando execução local...")
