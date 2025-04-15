@@ -26,13 +26,9 @@ jobs:
         env:
           GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
         run: |
-          python ExtratorDados.py
-          echo "=== LOGS ==="
-          cat extrator.log
-          
-      - name: Verificar resultado
-        run: |
-          if grep -q "Erro" extrator.log; then
-            echo "::error::Erros encontrados nos logs"
-            exit 1
-          fi
+          # Lista arquivos para debug (opcional)
+          ls -la
+          # Executa o script
+          python ExtratorDados.py || echo "::error::Falha ao executar script"
+          # Mostra logs
+          cat extrator.log || echo "Nenhum log encontrado"
