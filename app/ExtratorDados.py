@@ -28,7 +28,6 @@ meses = [
 ]
 
 def carregar_ultima_edicao(sheet):
-    """Carrega o número da última edição buscada da célula H1"""
     try:
         valor = sheet.acell('H1').value
         return int(valor) if valor and valor.isdigit() else 53
@@ -37,7 +36,6 @@ def carregar_ultima_edicao(sheet):
         return 53
 
 def salvar_ultima_edicao(sheet, n_edicao):
-    """Salva o número da última edição na célula H1"""
     try:
         sheet.update('H1', str(n_edicao))
         logger.info(f"Última edição atualizada para {n_edicao}")
@@ -47,7 +45,6 @@ def salvar_ultima_edicao(sheet, n_edicao):
         return False
 
 def processar_pdf(pdf_content, n_edicao, data_edicao):
-    """Processa o PDF em busca de editais"""
     editais = []
     try:
         pdf = PyPDF2.PdfReader(pdf_content)
@@ -75,31 +72,33 @@ def processar_pdf(pdf_content, n_edicao, data_edicao):
         return []
 
 def salvar_editais(sheet, editais):
-    """Salva todos os editais encontrados na planilha"""
     if not editais:
         logger.info("Nenhum edital para salvar")
-        return
+        return False
 
     try:
-        # Limpa a planilha antes de adicionar novos dados (opcional)
-        # sheet.clear()
-        
-        # Adiciona cabeçalhos
+        logger.info(f"Salvando {len(editais)} editais na planilha...")
+
+        # Cabeçalho
         sheet.append_row(["Data", "Edição", "Página", "Texto"])
-        
-        # Adiciona cada edital
+
+        # Montar todas as linhas
+        linhas_para_salvar = []
         for edital in editais:
             linhas = edital['texto'].split('\n')
-            sheet.append_row([edital['data'], edital['edicao'], edital['pagina'], linhas[0]])
+            linhas_para_salvar.append([edital['data'], edital['edicao'], edital['pagina'], linhas[0]])
             for linha in linhas[1:]:
-                sheet.append_row(["", "", "", linha])
-        
-        logger.info(f"{len(editais)} editais salvos com sucesso")
+                linhas_para_salvar.append(["", "", "", linha])
+
+        # Adicionar em lote
+        sheet.append_rows(linhas_para_salvar)
+        logger.info(f"{len(linhas_para_salvar)} linhas adicionadas com sucesso")
+        return True
     except Exception as e:
-        logger.error(f"Erro ao salvar editais: {e}")
+        logger.error(f"Erro ao salvar editais: {e}", exc_info=True)
+        return False
 
 def get_google_credentials():
-    """Obtém as credenciais do ambiente"""
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -120,39 +119,44 @@ def get_google_credentials():
 
 def main():
     try:
-        # 1. Configuração inicial
         hoje = datetime.today()
         if hoje.weekday() == 5: hoje -= timedelta(days=1)
         elif hoje.weekday() == 6: hoje -= timedelta(days=2)
         
-        # 2. Conexão com Google Sheets
         creds = get_google_credentials()
         client = gspread.authorize(creds)
         sheet = client.open("editais_chamamento_dodf_code").sheet1
-        
-        # Teste de conexão
-        sheet.update('J1', [[f"Última execução: {datetime.now()}"]])
 
-        # 3. Controle de edições
+        # Teste de escrita (debug de permissão)
+        try:
+            sheet.append_row(["Teste", "OK", "", ""])
+            logger.info("Teste de escrita na planilha: OK")
+        except Exception as e:
+            logger.error(f"Erro ao escrever na planilha (permissão?): {e}")
+            return "Erro: Sem permissão de escrita na planilha"
+
+        sheet.update('J1', [[f"Última execução: {datetime.now()}"]])
         ultima_edicao = carregar_ultima_edicao(sheet)
         n_edicao = ultima_edicao + 1
         data_edicao = f"{hoje.day:02d}-{hoje.month:02d}-{hoje.year}"
         
         logger.info(f"Buscando edição {n_edicao} - {data_edicao}")
 
-        # 4. Download e processamento do PDF
         url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={quote(f'{hoje.year}|{meses[hoje.month-1]}|DODF {n_edicao:03d} {data_edicao}|')}&arquivo={quote(f'DODF {n_edicao:03d} {data_edicao} INTEGRA.pdf')}"
         
         try:
             with urllib.request.urlopen(url) as response:
                 pdf_content = io.BytesIO(response.read())
                 editais = processar_pdf(pdf_content, n_edicao, data_edicao)
-                
+
                 if editais:
-                    salvar_editais(sheet, editais)
+                    if salvar_editais(sheet, editais):
+                        logger.info("Editais salvos corretamente")
+                    else:
+                        logger.error("Falha ao salvar editais")
                 else:
                     logger.info("Nenhum edital encontrado")
-                
+
                 salvar_ultima_edicao(sheet, n_edicao)
                 return "Sucesso" + (f" ({len(editais)} editais)" if editais else "")
                 
