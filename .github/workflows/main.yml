@@ -3,7 +3,7 @@ name: Extrair DODF Diariamente
 on:
   schedule:
     - cron: '0 15 * * *'  # 9h BRT (12:00 UTC)
-  workflow_dispatch:       # Permite rodar manualmente
+  workflow_dispatch:
 
 jobs:
   run-extractor:
@@ -24,6 +24,10 @@ jobs:
           
       - name: Executar extrator
         env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDS_JSON }}  # Corrigido para match com o código
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}  # Corrigido para match com o código
         run: |
           cd app && python ExtratorDados.py
+          
+      - name: Mostrar logs
+        run: |
+          cat app/extrator.log || echo "Nenhum log encontrado"
