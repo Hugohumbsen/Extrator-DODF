@@ -9,13 +9,12 @@ import os
 import json
 import logging
 
-# Configuração de logging
+# Configuração de logging (apenas para terminal)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('extrator.log')
+        logging.StreamHandler()  # Remove FileHandler para não criar arquivo local
     ]
 )
 logger = logging.getLogger(__name__)
@@ -110,11 +109,12 @@ def get_google_credentials():
             json.loads(os.environ['GOOGLE_CREDS_JSON']),
             scopes=scope
         )
-    elif os.path.exists('credenciais.json'):
-        return Credentials.from_service_account_file(
-            'credenciais.json',
+    elif os.path.exists('../projetodedadosjson'):
+        creds = Credentials.from_service_account_file(
+            '../projetodedadosjson',
             scopes=scope
         )
+        return creds
     else:
         raise Exception("Nenhuma credencial encontrada")
 
