@@ -22,13 +22,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyPDF2 gspread google-auth urllib3
           
-      - name: Executar extrator
+      - name: Configurar credenciais
         env:
           GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
         run: |
-          # Lista arquivos para debug (opcional)
-          ls -la
-          # Executa o script
+          # Cria o arquivo JSON no caminho esperado pelo código (../projetodedadosjson)
+          mkdir -p ../  # Garante que a pasta pai existe
+          echo "$GOOGLE_CREDS_JSON" > ../projetodedadosjson
+          # Debug: verifica se o arquivo foi criado
+          ls -la ../
+          
+      - name: Executar extrator
+        run: |
+          # Executa o script (os logs agora aparecem apenas no terminal)
           python ExtratorDados.py || echo "::error::Falha ao executar script"
-          # Mostra logs
-          cat extrator.log || echo "Nenhum log encontrado"
