@@ -81,14 +81,15 @@ def salvar_editais(sheet, editais):
 
         # Cabeçalho
         sheet.append_row(["Data", "Edição", "Página", "Texto"])
+        logger.info(f"Dados inseridos: ['Data', 'Edição', 'Página', 'Texto']")
 
         # Montar todas as linhas
         linhas_para_salvar = []
         for edital in editais:
             linhas = edital['texto'].split('\n')
-            linhas_para_salvar.append([edital['data'], edital['edicao'], edital['pagina'], linhas[0]])
-            for linha in linhas[1:]:
-                linhas_para_salvar.append(["", "", "", linha])
+            for linha in linhas:
+                logger.info(f"Salvando linha: {linha}")
+                linhas_para_salvar.append([edital['data'], edital['edicao'], edital['pagina'], linha])
 
         # Adicionar em lote
         sheet.append_rows(linhas_para_salvar)
@@ -145,6 +146,7 @@ def main():
         url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={quote(f'{hoje.year}|{meses[hoje.month-1]}|DODF {n_edicao:03d} {data_edicao}|')}&arquivo={quote(f'DODF {n_edicao:03d} {data_edicao} INTEGRA.pdf')}"
         
         try:
+            logger.info(f"Baixando PDF da URL: {url}")
             with urllib.request.urlopen(url) as response:
                 pdf_content = io.BytesIO(response.read())
                 editais = processar_pdf(pdf_content, n_edicao, data_edicao)
