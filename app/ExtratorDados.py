@@ -9,13 +9,11 @@ import os
 import json
 import logging
 
-# Configuração de logging (apenas para terminal)
+# Configuração de logging (apenas terminal)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()  # Remove FileHandler para não criar arquivo local
-    ]
+    handlers=[logging.StreamHandler()]  # Sem FileHandler
 )
 logger = logging.getLogger(__name__)
 
@@ -77,25 +75,18 @@ def salvar_editais(sheet, editais):
 
     try:
         logger.info(f"Salvando {len(editais)} editais na planilha...")
-
-        # Cabeçalho
         sheet.append_row(["Data", "Edição", "Página", "Texto"])
-        logger.info(f"Dados inseridos: ['Data', 'Edição', 'Página', 'Texto']")
 
-        # Montar todas as linhas
         linhas_para_salvar = []
         for edital in editais:
             linhas = edital['texto'].split('\n')
             for linha in linhas:
-                logger.info(f"Salvando linha: {linha}")
                 linhas_para_salvar.append([edital['data'], edital['edicao'], edital['pagina'], linha])
 
-        # Adicionar em lote
         sheet.append_rows(linhas_para_salvar)
-        logger.info(f"{len(linhas_para_salvar)} linhas adicionadas com sucesso")
         return True
     except Exception as e:
-        logger.error(f"Erro ao salvar editais: {e}", exc_info=True)
+        logger.error(f"Erro ao salvar editais: {e}")
         return False
 
 def get_google_credentials():
@@ -104,19 +95,24 @@ def get_google_credentials():
         "https://www.googleapis.com/auth/drive"
     ]
     
+    # 1. Tenta variável de ambiente (GitHub Actions)
     if 'GOOGLE_CREDS_JSON' in os.environ:
+        logger.info("Usando credenciais da variável de ambiente")
         return Credentials.from_service_account_info(
             json.loads(os.environ['GOOGLE_CREDS_JSON']),
             scopes=scope
         )
-    elif os.path.exists('../projetodedadosjson'):
-        creds = Credentials.from_service_account_file(
-            '../projetodedadosjson',
+    
+    # 2. Tenta arquivo local (desenvolvimento)
+    caminho_json = os.path.join(os.path.dirname(__file__), '..', 'projetodedadosjson')  # Nome SEM .json
+    if os.path.exists(caminho_json):
+        logger.info(f"Usando arquivo local: {caminho_json}")
+        return Credentials.from_service_account_file(
+            caminho_json,
             scopes=scope
         )
-        return creds
-    else:
-        raise Exception("Nenhuma credencial encontrada")
+    
+    raise Exception("Nenhuma credencial encontrada. Defina GOOGLE_CREDS_JSON ou adicione 'projetodedadosjson' na raiz do projeto.")
 
 def main():
     try:
@@ -128,15 +124,9 @@ def main():
         client = gspread.authorize(creds)
         sheet = client.open("editais_chamamento_dodf_code").sheet1
 
-        # Teste de escrita (debug de permissão)
-        try:
-            sheet.append_row(["Teste", "OK", "", ""])
-            logger.info("Teste de escrita na planilha: OK")
-        except Exception as e:
-            logger.error(f"Erro ao escrever na planilha (permissão?): {e}")
-            return "Erro: Sem permissão de escrita na planilha"
-
+        # Teste de permissão (opcional)
         sheet.update('J1', [[f"Última execução: {datetime.now()}"]])
+        
         ultima_edicao = carregar_ultima_edicao(sheet)
         n_edicao = ultima_edicao + 1
         data_edicao = f"{hoje.day:02d}-{hoje.month:02d}-{hoje.year}"
@@ -145,30 +135,20 @@ def main():
 
         url = f"https://dodf.df.gov.br/dodf/jornal/visualizar-pdf?pasta={quote(f'{hoje.year}|{meses[hoje.month-1]}|DODF {n_edicao:03d} {data_edicao}|')}&arquivo={quote(f'DODF {n_edicao:03d} {data_edicao} INTEGRA.pdf')}"
         
-        try:
-            logger.info(f"Baixando PDF da URL: {url}")
-            with urllib.request.urlopen(url) as response:
-                pdf_content = io.BytesIO(response.read())
-                editais = processar_pdf(pdf_content, n_edicao, data_edicao)
+        with urllib.request.urlopen(url) as response:
+            pdf_content = io.BytesIO(response.read())
+            editais = processar_pdf(pdf_content, n_edicao, data_edicao)
 
-                if editais:
-                    if salvar_editais(sheet, editais):
-                        logger.info("Editais salvos corretamente")
-                    else:
-                        logger.error("Falha ao salvar editais")
-                else:
-                    logger.info("Nenhum edital encontrado")
-
+            if editais and salvar_editais(sheet, editais):
                 salvar_ultima_edicao(sheet, n_edicao)
-                return "Sucesso" + (f" ({len(editais)} editais)" if editais else "")
-                
-        except urllib.error.HTTPError as e:
-            logger.error(f"Edição não encontrada (HTTP {e.code})")
-            salvar_ultima_edicao(sheet, n_edicao)
-            return "Edição não encontrada"
-            
+                return "Sucesso"
+            return "Nenhum edital encontrado"
+
+    except urllib.error.HTTPError as e:
+        logger.error(f"Edição não encontrada (HTTP {e.code})")
+        return "Edição não encontrada"
     except Exception as e:
-        logger.error(f"Erro crítico: {e}", exc_info=True)
+        logger.error(f"Erro crítico: {e}")
         return f"Erro: {str(e)}"
 
 if __name__ == "__main__":
